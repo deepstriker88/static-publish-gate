@@ -1,0 +1,4 @@
+# Security boundaries
+Local, trusted, immutable input directory only. Default metadata mode never reads file contents. Optional snapshot mode reads at most 100 MiB in bounded chunks for SHA-256; no content is printed or sent. No network or writes to input tree. Symlinks, hardlinks and special files are rejected; directory replacements by concurrent writers are outside the threat model. No guarantee against tampered approval manifests, embedded secrets, or post-check changes. Protect reviewed snapshots and keep reports private.
+
+Approval and snapshot files must be regular files; bounded nonblocking reads and metadata checks reject links and common changes. Initial/final file fingerprints are compared in hash mode. This is still limited to quiescent trusted directories, and does not prove a race-free scan or upload.
