@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from static_publish_gate import desktop, inspect
 from static_publish_gate.desktop_ui import write_new_json
@@ -28,6 +29,23 @@ class DesktopAdapterTests(unittest.TestCase):
         r=desktop.demo()
         self.assertEqual(r.state,"review")
         self.assertEqual(r.data["issues"],[{"code":"forbidden_path","path":"assets/app.js.map"}])
+
+    def test_example_binary_bytes_independent_of_windows_newlines(self):
+        original_write=Path.write_text
+        def windows_text_write(path,data,*args,**kwargs):
+            kwargs["newline"]="\r\n"
+            return original_write(path,data,*args,**kwargs)
+        with patch.object(Path,"write_text",windows_text_write):
+            blocked=self.root/"blocked"
+            clean=self.root/"clean"
+            desktop.make_example(blocked,True)
+            desktop.make_example(clean,False)
+            expected=b"<!doctype html><title>Example build</title><h1>Example</h1>\n"
+            self.assertEqual((blocked/"index.html").read_bytes(),expected)
+            self.assertEqual((clean/"index.html").read_bytes(),expected)
+            self.assertEqual((blocked/"assets/app.js.map").read_bytes(),b'{"version":3,"sources":[],"mappings":""}\n')
+            self.assertEqual((clean/"assets/app.js").read_bytes(),b"console.log('synthetic example');\n")
+            self.assertEqual(desktop.demo().data["bytes"],60)
 
     def test_snapshot_verified_then_same_size_change(self):
         r=self.run_mode("Create snapshot")

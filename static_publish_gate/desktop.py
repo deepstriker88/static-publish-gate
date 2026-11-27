@@ -80,11 +80,11 @@ def run(values):
 def make_example(root, blocked=False):
     root=Path(root);root.mkdir()
     (root/"assets").mkdir()
-    (root/"index.html").write_text("<!doctype html><title>Example build</title><h1>Example</h1>\n",encoding="utf-8")
+    (root/"index.html").write_bytes(b"<!doctype html><title>Example build</title><h1>Example</h1>\n")
     if blocked:
-        (root/"assets/app.js.map").write_text('{"version":3,"sources":[],"mappings":""}\n',encoding="utf-8")
+        (root/"assets/app.js.map").write_bytes(b'{"version":3,"sources":[],"mappings":""}\n')
     else:
-        (root/"assets/app.js").write_text("console.log('synthetic example');\n",encoding="utf-8")
+        (root/"assets/app.js").write_bytes(b"console.log('synthetic example');\n")
 
 
 def demo():
