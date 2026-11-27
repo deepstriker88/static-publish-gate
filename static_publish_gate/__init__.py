@@ -27,6 +27,25 @@ def path_valid(s):
         unicodedata.category(c).startswith("C") or c in '<>:"|?*' for c in p
     ) and not p.endswith((" ", ".")) and p.split(".")[0].rstrip(" ").casefold() not in WINDOWS_RESERVED for p in s.split("/"))
 
+_WINDOWS = os.name == "nt"
+
+def _same_file_cross_api(a, b):
+    if not stat.S_ISREG(a.st_mode) or not stat.S_ISREG(b.st_mode):
+        return False
+    if any(getattr(x, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0) for x in (a,b)):
+        return False
+    if not a.st_ino or not b.st_ino:
+        return False
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+    if any(getattr(a,k) != getattr(b,k) for k in fields):
+        return False
+    if not _WINDOWS:
+        return a.st_ctime_ns == b.st_ctime_ns
+    # Windows Python >=3.12: compare creation time explicitly, not ctime.
+    birth_a = getattr(a, "st_birthtime_ns", None)
+    birth_b = getattr(b, "st_birthtime_ns", None)
+    return birth_a is not None and birth_a == birth_b
+
 def _read_manifest(path):
     """Bounded regular-file read; reject symlinks, FIFO and changed file metadata."""
     path = Path(path)
@@ -37,11 +56,11 @@ def _read_manifest(path):
     fd = os.open(path, flags)
     with os.fdopen(fd, "rb") as f:
         opened = os.fstat(f.fileno())
-        if not stat.S_ISREG(opened.st_mode) or _fingerprint(opened) != _fingerprint(before):
+        if not stat.S_ISREG(opened.st_mode) or not _same_file_cross_api(before, opened) or (not _WINDOWS and _fingerprint(opened) != _fingerprint(before)):
             raise ValueError("manifest changed before reading")
         raw = f.read(MAX_MANIFEST + 1)
         if (len(raw) > MAX_MANIFEST or len(raw) != before.st_size
-                or _fingerprint(os.fstat(f.fileno())) != _fingerprint(before)
+                or _fingerprint(os.fstat(f.fileno())) != _fingerprint(opened)
                 or _fingerprint(path.lstat()) != _fingerprint(before)):
             raise ValueError("manifest changed or exceeds limit")
     return raw
@@ -116,7 +135,7 @@ def inspect(root, approved=None, required=("index.html",), max_entries=MAX_ENTRI
                         fail("forbidden_path", rel)
                         continue
                     try:
-                        mode = entry.stat(follow_symlinks=False)
+                        mode = os.lstat(entry.path) if _WINDOWS else entry.stat(follow_symlinks=False)
                     except OSError:
                         fail("unreadable_entry", rel)
                         complete = False
@@ -201,7 +220,7 @@ def _hash_file(path, max_bytes, expected_fingerprint=None):
     fd = os.open(path, flags)
     try:
         opened = os.fstat(fd)
-        if _fingerprint(opened) != _fingerprint(before) or not stat.S_ISREG(opened.st_mode):
+        if not _same_file_cross_api(before, opened) or opened.st_nlink != before.st_nlink or (not _WINDOWS and _fingerprint(opened) != _fingerprint(before)) or not stat.S_ISREG(opened.st_mode):
             raise ValueError("file changed before reading")
         digest = hashlib.sha256()
         consumed = 0
@@ -213,7 +232,7 @@ def _hash_file(path, max_bytes, expected_fingerprint=None):
             if consumed > before.st_size:
                 raise ValueError("file grew while reading")
             digest.update(data)
-        if (consumed != before.st_size or _fingerprint(os.fstat(fd)) != _fingerprint(before)
+        if (consumed != before.st_size or _fingerprint(os.fstat(fd)) != _fingerprint(opened)
                 or _fingerprint(path.lstat()) != _fingerprint(before)):
             raise ValueError("file changed while reading")
         return digest.hexdigest(), consumed
